@@ -1,7 +1,7 @@
 {
   "name": "ideia-remote",
   "productName": "IDEIA Remote",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Acesso remoto simples e gratuito com transferência de arquivos",
   "main": "src/main.js",
   "scripts": {
@@ -59,7 +59,11 @@
         "libsecret-1-0"
       ]
     },
-    "afterPack": "build/after-pack.js"
+    "afterPack": "build/after-pack.js",
+    "artifactName": "IDEIA-Remote-${version}-${os}-${arch}.${ext}",
+    "nsis": {
+      "artifactName": "IDEIA-Remote-Setup-${version}.${ext}"
+    }
   },
   "author": "IDEIA <luizferrazj-web@users.noreply.github.com>",
   "homepage": "https://github.com/luizferrazj-web/REMOTEAPPCONNECT"

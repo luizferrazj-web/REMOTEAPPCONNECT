@@ -7,6 +7,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publicar como Release com esta tag (ex.: v0.2.0). Vazio = só compilar.'
+        required: false
 
 jobs:
   build:
@@ -52,12 +56,26 @@ jobs:
             app/dist/*.exe
             app/dist/*.AppImage
             app/dist/*.deb
-      - name: Anexar à release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: |
-            app/dist/*.dmg
-            app/dist/*.exe
-            app/dist/*.AppImage
-            app/dist/*.deb
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: IDEIA Remote ${{ inputs.release_tag || github.ref_name }}
+          make_latest: true
+          fail_on_unmatched_files: true
+          body: |
+            Instale nos dois computadores e conecte pelo ID e senha.
+            - **Windows**: `IDEIA-Remote-Setup-*.exe`
+            - **Mac (Apple Silicon)**: arquivo `.dmg`
+            - **Linux**: `.AppImage` ou `.deb`
+          files: out/*
