@@ -6,7 +6,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node test/e2e.js"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.0"

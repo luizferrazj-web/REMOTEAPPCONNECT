@@ -11,14 +11,14 @@ $('saveFixed').onclick = () => {
   if (v) localStorage.setItem('fixedPass', v); else localStorage.removeItem('fixedPass');
   alert(v ? 'Senha fixa salva.' : 'Senha fixa removida.');
 };
-const validPassword = (p) => p === password || (!!localStorage.getItem('fixedPass') && p === localStorage.getItem('fixedPass'));
 $('status').addEventListener('dblclick', () => {
   if ((window.IDEIA_CONFIG.firebase || {}).apiKey) return;
   const s = prompt('Endereço do servidor de sinalização', localStorage.getItem('server') || 'ws://localhost:8080');
   if (s) { localStorage.setItem('server', s); location.reload(); }
 });
 
-let myId, pc, ctrl, fileCh, isHost = false, peerId = null, hostDisplays = null, offerTimer;
+let myId, pc, ctrl, fileCh, isHost = false, peerId = null, hostDisplays = null, waitTimer;
+let remoteSet = false, pendingIce = [];
 
 const transport = window.createTransport({
   onStatus: (t) => { $('status').textContent = t; },
@@ -29,81 +29,133 @@ const transport = window.createTransport({
     $('myId').textContent = id.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
     $('status').textContent = 'Pronto';
   },
-  onError: () => { alert('ID não encontrado ou offline.'); endSession(); },
-  onSignal: (from, data) => onSignal(from, data),
+  onError: () => { if (pc && !isHost && pc.connectionState !== 'connected') fail('ID não encontrado ou computador offline.'); },
+  onSignal: (from, data) => onSignal(from, data).catch((err) => console.error('sinalização', err)),
 });
 const send = (to, data) => transport.send(to, data);
 
+async function proof(pass, sdp) {
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${pass}\n${sdp}`));
+  return Array.from(new Uint8Array(h), (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+const setOverlay = (text) => { $('overlay').textContent = text; $('overlay').style.display = text ? 'flex' : 'none'; };
+
+function fail(message) {
+  endSession();
+  alert(message);
+}
+
 function newPC(remote) {
-  pc = new RTCPeerConnection(ICE);
+  const policy = localStorage.getItem('icePolicy') === 'relay' ? 'relay' : 'all';
+  pc = new RTCPeerConnection({ ...ICE, iceTransportPolicy: policy });
   peerId = remote;
-  pc.onicecandidate = (e) => e.candidate && send(remote, { kind: 'ice', candidate: e.candidate });
+  remoteSet = false;
+  pendingIce = [];
+  const mine = pc;
+  pc.onicecandidate = (e) => e.candidate && send(remote, { kind: 'ice', candidate: e.candidate.toJSON() });
   pc.onconnectionstatechange = () => {
-    if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) endSession();
+    if (pc !== mine) return;
+    const s = pc.connectionState;
+    if (s === 'connected') { clearTimeout(waitTimer); if (!isHost) setOverlay($('video').videoWidth ? '' : 'Carregando a tela…'); }
+    else if (s === 'disconnected') setOverlay('Conexão instável — reconectando…');
+    else if (s === 'failed') fail('Não foi possível conectar: a rede de um dos computadores bloqueou a conexão.');
   };
+}
+
+// Candidatos podem chegar antes da descrição remota; guarda e aplica depois.
+async function applyRemote(desc) {
+  await pc.setRemoteDescription(desc);
+  remoteSet = true;
+  pendingIce.splice(0).forEach((c) => pc.addIceCandidate(c).catch(() => {}));
 }
 
 async function onSignal(from, d) {
   if (d.kind === 'offer') {
     if (pc) return send(from, { kind: 'denied', reason: 'Máquina ocupada.' });
-    if (!validPassword(d.password)) return send(from, { kind: 'denied', reason: 'Senha incorreta.' });
     isHost = true;
     newPC(from);
+    const mine = pc;
     pc.ondatachannel = (e) => (e.channel.label === 'ctrl' ? setupCtrl(e.channel) : setupFile(e.channel));
+    const fixed = localStorage.getItem('fixedPass');
+    const ok = d.proof === await proof(password, d.sdp) || (!!fixed && d.proof === await proof(fixed, d.sdp));
+    if (pc !== mine) return;
+    if (!ok) { endSession(); return send(from, { kind: 'denied', reason: 'Senha incorreta.' }); }
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      if (pc !== mine) return stream.getTracks().forEach((t) => t.stop());
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-    } catch { return endSession(); }
-    await pc.setRemoteDescription({ type: 'offer', sdp: d.sdp });
+    } catch (err) {
+      endSession();
+      return send(from, { kind: 'denied', reason: 'O computador remoto não conseguiu capturar a tela (verifique as permissões de gravação de tela).' });
+    }
+    await applyRemote({ type: 'offer', sdp: d.sdp });
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     send(from, { kind: 'answer', sdp: answer.sdp });
-    showSession(`Controlado por ${from}`);
-    window.native.displays().then((list) => ctrl && ctrl.readyState === 'open' ? ctrl.send(JSON.stringify({ kind: 'displays', list })) : (hostDisplays = list));
-  } else if (d.kind === 'answer' && pc) {
-    clearTimeout(offerTimer);
-    await pc.setRemoteDescription({ type: 'answer', sdp: d.sdp });
-  } else if (d.kind === 'ice' && pc) {
-    pc.addIceCandidate(d.candidate).catch(() => {});
-  } else if (d.kind === 'denied') {
-    clearTimeout(offerTimer);
-    alert(d.reason);
-    endSession();
+    showSession(`Sua tela está sendo acessada por ${from}`);
+    window.native.displays().then((list) => (ctrl && ctrl.readyState === 'open' ? ctrl.send(JSON.stringify({ kind: 'displays', list })) : (hostDisplays = list)));
+  } else if (!pc || from !== peerId) {
+    return;
+  } else if (d.kind === 'answer' && !isHost) {
+    clearTimeout(waitTimer);
+    waitTimer = setTimeout(() => fail('Não foi possível conectar: a rede de um dos computadores bloqueou a conexão.'), 30000);
+    await applyRemote({ type: 'answer', sdp: d.sdp });
+  } else if (d.kind === 'ice') {
+    if (remoteSet) pc.addIceCandidate(d.candidate).catch(() => {});
+    else pendingIce.push(d.candidate);
+  } else if (d.kind === 'denied' && !isHost) {
+    fail(d.reason);
   }
 }
 
 $('connect').onclick = async () => {
   const to = $('remoteId').value.replace(/\s/g, '');
   if (!/^\d{9}$/.test(to)) return alert('Digite um ID de 9 dígitos.');
+  if (to === myId) return alert('Esse é o ID deste computador. Digite o ID do outro.');
   if (pc) return;
   isHost = false;
   newPC(to);
   pc.addTransceiver('video', { direction: 'recvonly' });
-  pc.ontrack = (e) => { $('video').srcObject = e.streams[0]; };
+  pc.ontrack = (e) => {
+    const v = $('video');
+    v.srcObject = e.streams[0] || new MediaStream([e.track]);
+    v.onloadeddata = () => setOverlay('');
+    v.play().catch(() => {});
+  };
   setupCtrl(pc.createDataChannel('ctrl'));
   setupFile(pc.createDataChannel('file'));
+  showSession(`Conectado a ${to}`);
+  setOverlay('Conectando…');
+  bindInput();
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  send(to, { kind: 'offer', sdp: offer.sdp, password: $('remotePass').value });
-  offerTimer = setTimeout(() => { alert('Sem resposta: a máquina está offline ou fechada.'); endSession(); }, 20000);
-  showSession(`Conectado a ${to}`);
-  bindInput();
+  send(to, { kind: 'offer', sdp: offer.sdp, proof: await proof($('remotePass').value.trim(), offer.sdp) });
+  waitTimer = setTimeout(() => fail('Sem resposta: o outro computador está offline ou com o app fechado.'), 20000);
 };
 
-$('disconnect').onclick = endSession;
+$('disconnect').onclick = () => {
+  if (ctrl && ctrl.readyState === 'open') ctrl.send(JSON.stringify({ kind: 'bye' }));
+  setTimeout(endSession, 100);
+};
 
 function showSession(text) {
   $('home').style.display = 'none';
   $('session').style.display = 'flex';
   $('peerInfo').textContent = text;
   $('screenWrap').style.display = isHost ? 'none' : 'flex';
+  $('files').style.flex = isHost ? '1' : '';
 }
 
 function endSession() {
-  clearTimeout(offerTimer);
-  if (pc) { pc.onconnectionstatechange = null; pc.close(); }
-  pc = ctrl = fileCh = null;
+  clearTimeout(waitTimer);
+  if (pc) {
+    pc.getSenders().forEach((s) => s.track && s.track.stop());
+    pc.close();
+  }
+  pc = ctrl = fileCh = peerId = null;
   $('video').srcObject = null;
+  setOverlay('');
   $('monitor').style.display = 'none';
   hostDisplays = null;
   $('session').style.display = 'none';
@@ -117,9 +169,11 @@ function setupCtrl(ch) {
   ch.onopen = () => {
     if (isHost && hostDisplays) ch.send(JSON.stringify({ kind: 'displays', list: hostDisplays }));
   };
+  ch.onclose = () => { if (ctrl === ch) endSession(); };
   ch.onmessage = async (e) => {
     const m = JSON.parse(e.data);
-    if (m.kind === 'displays' && !isHost) {
+    if (m.kind === 'bye') endSession();
+    else if (m.kind === 'displays' && !isHost) {
       const sel = $('monitor');
       sel.innerHTML = '';
       m.list.forEach((d) => sel.add(new Option(d.name, d.id)));
@@ -169,6 +223,15 @@ const log = (text) => {
   return d;
 };
 
+const saving = [];
+window.native.onDownload((d) => {
+  const s = saving.shift();
+  if (!s) return;
+  URL.revokeObjectURL(s.url);
+  s.el.textContent = d.ok ? `✓ Recebido: ${d.name} (pasta Downloads — clique para abrir)` : `✗ Falha ao salvar ${d.name}`;
+  if (d.ok) { s.el.style.cursor = 'pointer'; s.el.dataset.path = d.path; s.el.onclick = () => window.native.showFile(d.path); }
+});
+
 function setupFile(ch) {
   fileCh = ch;
   ch.binaryType = 'arraybuffer';
@@ -183,7 +246,8 @@ function setupFile(ch) {
         a.href = URL.createObjectURL(new Blob(incoming.parts));
         a.download = incoming.name.replace(/[\\/]/g, '_');
         a.click();
-        incoming.el.textContent = `✓ Recebido: ${incoming.name}`;
+        incoming.el.textContent = `Salvando ${incoming.name}…`;
+        saving.push({ el: incoming.el, url: a.href });
         incoming = null;
       }
     } else if (incoming) {
@@ -216,5 +280,16 @@ const drop = $('files');
 drop.ondragover = (e) => { e.preventDefault(); $('drop').classList.add('over'); };
 drop.ondragleave = () => $('drop').classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); $('drop').classList.remove('over'); [...e.dataTransfer.files].forEach(sendFile); };
+
+window.native.status().then((s) => {
+  const warn = [];
+  if (!s.control) warn.push('O controle de mouse e teclado não está disponível neste computador.');
+  if (s.platform === 'darwin' && !s.screen) warn.push('Autorize "Gravação de Tela" para este app, senão a tela aparece preta para quem conecta.');
+  if (s.platform === 'darwin' && !s.accessibility) warn.push('Autorize "Acessibilidade" para permitir o controle remoto.');
+  if (!warn.length) return;
+  $('warn').textContent = warn.join(' ');
+  $('warn').style.display = 'block';
+  if (s.platform === 'darwin') $('warn').onclick = () => window.native.openPrivacy();
+});
 
 transport.start();

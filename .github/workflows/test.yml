@@ -1,0 +1,42 @@
+name: Teste de conexão
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: server
+      - run: npm install
+        working-directory: app
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libxtst6
+      - name: Sinalização local
+        shell: bash
+        working-directory: app
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }} node test/e2e.js
+      - name: Servidor público
+        if: always()
+        shell: bash
+        working-directory: app
+        env:
+          SIGNALING: public
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }} node test/e2e.js
+      - name: Servidor público com TURN forçado
+        if: always()
+        shell: bash
+        working-directory: app
+        env:
+          SIGNALING: public
+          RELAY: 1
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }} node test/e2e.js

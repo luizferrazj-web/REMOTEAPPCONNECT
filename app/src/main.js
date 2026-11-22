@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, shell, systemPreferences } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 let nut = null;
 try { nut = require('@nut-tree-fork/nut-js'); nut.mouse.config.mouseSpeed = 100000; } catch { /* controle indisponível */ }
@@ -27,6 +28,18 @@ app.whenReady().then(() => {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     const id = String(currentDisplay().id);
     callback({ video: sources.find((s) => s.display_id === id) || sources[0] });
+  });
+  // Arquivos recebidos vão direto para a pasta Downloads, sem diálogo.
+  session.defaultSession.on('will-download', (_e, item, wc) => {
+    const dir = app.getPath('downloads');
+    fs.mkdirSync(dir, { recursive: true });
+    const { name, ext } = path.parse(path.basename(item.getFilename()) || 'arquivo');
+    let target = path.join(dir, name + ext);
+    for (let i = 1; fs.existsSync(target); i++) target = path.join(dir, `${name} (${i})${ext}`);
+    item.setSavePath(target);
+    item.once('done', (_e2, state) => {
+      if (!wc.isDestroyed()) wc.send('download-done', { name: path.basename(target), path: target, ok: state === 'completed' });
+    });
   });
   createWindow();
 });
@@ -86,3 +99,19 @@ ipcMain.handle('input', async (_e, ev) => {
     }
   } catch (err) { console.error('input error', err.message); }
 });
+
+ipcMain.handle('status', () => {
+  const mac = process.platform === 'darwin';
+  return {
+    platform: process.platform,
+    control: !!nut,
+    screen: !mac || systemPreferences.getMediaAccessStatus('screen') === 'granted',
+    accessibility: !mac || systemPreferences.isTrustedAccessibilityClient(false),
+  };
+});
+
+ipcMain.handle('show-file', (_e, p) => {
+  const rel = path.relative(app.getPath('downloads'), path.resolve(String(p)));
+  if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) shell.showItemInFolder(path.resolve(String(p)));
+});
+ipcMain.handle('open-privacy', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'));

@@ -99,7 +99,9 @@
   function publicTransport(h) {
     const host = cfg.publicSignaling || 'wss://0.peerjs.com/peerjs?key=peerjs';
     let ws, myId, hb, tries = 0;
-    const token = Math.random().toString(36).slice(2);
+    // Token fixo: permite retomar o mesmo ID depois de uma queda de rede.
+    const token = localStorage.getItem('peerToken') || Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    localStorage.setItem('peerToken', token);
     function start() {
       clearInterval(hb);
       myId = tries++ === 0 && /^\d{9}$/.test(localStorage.getItem('id') || '') ? localStorage.getItem('id') : randomId();
