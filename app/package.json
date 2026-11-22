@@ -1,0 +1,26 @@
+{
+  "name": "ideia-remote",
+  "productName": "IDEIA Remote",
+  "version": "0.1.0",
+  "description": "Acesso remoto simples e gratuito com transferência de arquivos",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.ideia.remote",
+    "productName": "IDEIA Remote",
+    "files": ["src/**/*", "package.json"],
+    "mac": { "target": ["dmg"], "category": "public.app-category.utilities" },
+    "win": { "target": ["nsis"] },
+    "linux": { "target": ["AppImage", "deb"], "category": "Utility" }
+  }
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src ws: wss:; img-src 'self' data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'">
+<title>IDEIA Remote</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #12141a; color: #e8eaf0; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 12px 20px; background: #1b1e27; display: flex; justify-content: space-between; align-items: center; }
+  header b { font-size: 18px; }
+  #status { font-size: 13px; color: #8b93a7; }
+  main { flex: 1; display: flex; gap: 20px; padding: 24px; overflow: auto; }
+  .card { background: #1b1e27; border-radius: 12px; padding: 24px; flex: 1; min-width: 280px; }
+  h2 { margin-top: 0; font-size: 16px; color: #8b93a7; font-weight: 600; }
+  .big { font-size: 34px; letter-spacing: 3px; font-weight: 700; margin: 8px 0 16px; }
+  input[type=text], input[type=password] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #2c3040; background: #12141a; color: inherit; font-size: 16px; margin-bottom: 10px; }
+  button { padding: 12px 18px; border: 0; border-radius: 8px; background: #3b82f6; color: #fff; font-size: 15px; cursor: pointer; }
+  button.sec { background: #2c3040; }
+  #session { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  #bar { padding: 8px 12px; background: #1b1e27; display: flex; gap: 10px; align-items: center; }
+  #area { flex: 1; display: flex; min-height: 0; }
+  #screenWrap { flex: 1; background: #000; display: flex; align-items: center; justify-content: center; min-width: 0; }
+  video { max-width: 100%; max-height: 100%; outline: none; }
+  #files { width: 260px; background: #1b1e27; padding: 12px; overflow: auto; }
+  #drop { border: 2px dashed #3b4157; border-radius: 10px; padding: 24px 8px; text-align: center; color: #8b93a7; margin-bottom: 12px; }
+  #drop.over { border-color: #3b82f6; color: #3b82f6; }
+  .item { font-size: 13px; padding: 6px 0; border-bottom: 1px solid #2c3040; word-break: break-all; }
+</style>
+</head>
+<body>
+<header><b>IDEIA Remote</b><span id="status">Conectando ao servidor…</span></header>
+<main id="home">
+  <div class="card">
+    <h2>Seu computador</h2>
+    <div>ID</div><div class="big" id="myId">---</div>
+    <div>Senha</div><div class="big" id="myPass">---</div>
+    <label><input type="checkbox" id="allowControl" checked> Permitir controle remoto</label>
+  </div>
+  <div class="card">
+    <h2>Conectar a outro computador</h2>
+    <input type="text" id="remoteId" placeholder="ID remoto">
+    <input type="password" id="remotePass" placeholder="Senha">
+    <button id="connect">Conectar</button>
+  </div>
+</main>
+<section id="session">
+  <div id="bar"><button class="sec" id="disconnect">Desconectar</button><span id="peerInfo"></span></div>
+  <div id="area">
+    <div id="screenWrap"><video id="video" autoplay playsinline tabindex="0"></video></div>
+    <aside id="files">
+      <div id="drop">Arraste arquivos aqui<br>ou<br><button class="sec" id="pick">Escolher</button></div>
+      <input type="file" id="fileInput" multiple hidden>
+      <div id="log"></div>
+    </aside>
+  </div>
+</section>
+<script src="renderer.js"></script>
+</body>
+</html>
