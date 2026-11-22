@@ -1,16 +1,24 @@
 const $ = (id) => document.getElementById(id);
 const SERVER = localStorage.getItem('server') || 'ws://localhost:8080';
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+let ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const CHUNK = 16 * 1024;
 
 const password = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
 $('myPass').textContent = password;
+$('fixedPass').value = localStorage.getItem('fixedPass') || '';
+$('saveFixed').onclick = () => {
+  const v = $('fixedPass').value;
+  if (v && v.length < 8) return alert('A senha fixa precisa ter pelo menos 8 caracteres.');
+  if (v) localStorage.setItem('fixedPass', v); else localStorage.removeItem('fixedPass');
+  alert(v ? 'Senha fixa salva.' : 'Senha fixa removida.');
+};
+const validPassword = (p) => p === password || (!!localStorage.getItem('fixedPass') && p === localStorage.getItem('fixedPass'));
 $('status').addEventListener('dblclick', () => {
   const s = prompt('Endereço do servidor de sinalização', SERVER);
   if (s) { localStorage.setItem('server', s); location.reload(); }
 });
 
-let ws, myId, pc, ctrl, fileCh, isHost = false, peerId = null;
+let ws, myId, pc, ctrl, fileCh, isHost = false, peerId = null, hostDisplays = null;
 
 function connectSignaling() {
   ws = new WebSocket(SERVER);
@@ -20,6 +28,7 @@ function connectSignaling() {
     const m = JSON.parse(e.data);
     if (m.type === 'registered') {
       myId = m.id;
+      if (m.iceServers && m.iceServers.length) ICE = { iceServers: m.iceServers };
       localStorage.setItem('id', myId);
       $('myId').textContent = myId.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
       $('status').textContent = 'Pronto (duplo clique para trocar o servidor)';
@@ -43,7 +52,7 @@ function newPC(remote) {
 async function onSignal(from, d) {
   if (d.kind === 'offer') {
     if (pc) return send(from, { kind: 'denied', reason: 'Máquina ocupada.' });
-    if (d.password !== password) return send(from, { kind: 'denied', reason: 'Senha incorreta.' });
+    if (!validPassword(d.password)) return send(from, { kind: 'denied', reason: 'Senha incorreta.' });
     isHost = true;
     newPC(from);
     pc.ondatachannel = (e) => (e.channel.label === 'ctrl' ? setupCtrl(e.channel) : setupFile(e.channel));
@@ -56,6 +65,7 @@ async function onSignal(from, d) {
     await pc.setLocalDescription(answer);
     send(from, { kind: 'answer', sdp: answer.sdp });
     showSession(`Controlado por ${from}`);
+    window.native.displays().then((list) => ctrl && ctrl.readyState === 'open' ? ctrl.send(JSON.stringify({ kind: 'displays', list })) : (hostDisplays = list));
   } else if (d.kind === 'answer' && pc) {
     await pc.setRemoteDescription({ type: 'answer', sdp: d.sdp });
   } else if (d.kind === 'ice' && pc) {
@@ -96,6 +106,8 @@ function endSession() {
   if (pc) { pc.onconnectionstatechange = null; pc.close(); }
   pc = ctrl = fileCh = null;
   $('video').srcObject = null;
+  $('monitor').style.display = 'none';
+  hostDisplays = null;
   $('session').style.display = 'none';
   $('home').style.display = 'flex';
   $('log').innerHTML = '';
@@ -104,8 +116,25 @@ function endSession() {
 // ---- Controle remoto ----
 function setupCtrl(ch) {
   ctrl = ch;
-  ch.onmessage = (e) => {
-    if (isHost && $('allowControl').checked) window.native.input(JSON.parse(e.data));
+  ch.onopen = () => {
+    if (isHost && hostDisplays) ch.send(JSON.stringify({ kind: 'displays', list: hostDisplays }));
+  };
+  ch.onmessage = async (e) => {
+    const m = JSON.parse(e.data);
+    if (m.kind === 'displays' && !isHost) {
+      const sel = $('monitor');
+      sel.innerHTML = '';
+      m.list.forEach((d) => sel.add(new Option(d.name, d.id)));
+      sel.style.display = m.list.length > 1 ? '' : 'none';
+      sel.onchange = () => ctrl.send(JSON.stringify({ kind: 'display', id: Number(sel.value) }));
+    } else if (m.kind === 'display' && isHost) {
+      await window.native.selectDisplay(m.id);
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (sender) { const old = sender.track; await sender.replaceTrack(stream.getVideoTracks()[0]); old.stop(); }
+      } catch { /* mantém o monitor atual */ }
+    } else if (m.t && isHost && $('allowControl').checked) window.native.input(m);
   };
 }
 
@@ -126,7 +155,11 @@ function bindInput() {
   v.onmouseup = (e) => emit({ t: 'up', b: e.button, ...norm(e) });
   v.oncontextmenu = (e) => e.preventDefault();
   v.onwheel = (e) => { e.preventDefault(); emit({ t: 'scroll', dy: e.deltaY }); };
-  v.onkeydown = (e) => { e.preventDefault(); emit({ t: 'key', k: e.key }); };
+  v.onkeydown = (e) => {
+    e.preventDefault();
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    emit({ t: 'key', k: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+  };
 }
 
 // ---- Transferência de arquivos ----

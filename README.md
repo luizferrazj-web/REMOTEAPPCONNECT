@@ -24,5 +24,18 @@ Por padrão o app usa `ws://localhost:8080`. Dê **duplo clique** no texto de st
 - **macOS**: autorizar *Gravação de Tela* e *Acessibilidade* em Ajustes do Sistema > Privacidade.
 - **Linux**: captura/controle funcionam melhor em X11 (Wayland é limitado).
 
-## Limitações do MVP
-Apenas o monitor principal; teclado sem combinações com Ctrl/Alt; sem TURN (algumas redes exigem); sem criptografia além do DTLS do WebRTC e sem acesso não supervisionado com senha fixa.
+## Acesso sem supervisão
+No cartão "Seu computador", defina uma **senha fixa** (mín. 8 caracteres) e deixe o app aberto: você conecta sempre com o mesmo ID e essa senha. Ela fica salva localmente no app.
+
+## Hospedar servidor + TURN (Docker)
+```bash
+cd deploy && cp .env.example .env   # edite PUBLIC_HOST, TURN_USER, TURN_PASS
+docker compose up -d
+```
+Sobe a sinalização (porta 8080) e um coturn (3478 e UDP 49160-49200). Os apps recebem a config TURN automaticamente do servidor. Para internet, coloque um proxy TLS (ex.: Caddy/nginx) na frente da 8080 e use `wss://`.
+
+## Vários monitores e atalhos
+Com mais de um monitor na máquina remota, aparece um seletor na barra da sessão. Atalhos com Ctrl/Alt/Meta/Shift são repassados (ex.: Ctrl+C).
+
+## Limitações
+Teclas de mídia e algumas combinações do sistema não são repassadas; no Linux Wayland captura/controle são limitados; monitores com escalas DPI diferentes podem ter o mouse levemente impreciso.

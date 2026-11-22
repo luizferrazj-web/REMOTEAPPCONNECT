@@ -1,0 +1,19 @@
+# Uso: cp .env.example .env (edite) && docker compose up -d
+services:
+  signaling:
+    build: ../server
+    restart: always
+    environment:
+      TURN_URL: turn:${PUBLIC_HOST}:3478
+      TURN_USER: ${TURN_USER}
+      TURN_PASS: ${TURN_PASS}
+    ports:
+      - "8080:8080"
+  coturn:
+    image: coturn/coturn:latest
+    restart: always
+    network_mode: host
+    command: >
+      -n --log-file=stdout --realm=ideia --fingerprint --lt-cred-mech
+      --user=${TURN_USER}:${TURN_PASS} --external-ip=${PUBLIC_HOST}
+      --min-port=49160 --max-port=49200 --no-multicast-peers

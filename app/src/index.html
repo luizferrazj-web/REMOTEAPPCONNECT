@@ -36,6 +36,9 @@
     <div>ID</div><div class="big" id="myId">---</div>
     <div>Senha</div><div class="big" id="myPass">---</div>
     <label><input type="checkbox" id="allowControl" checked> Permitir controle remoto</label>
+    <h2 style="margin-top:20px">Acesso sem supervisão</h2>
+    <input type="password" id="fixedPass" placeholder="Senha fixa (opcional, mín. 8 caracteres)">
+    <button class="sec" id="saveFixed">Salvar senha fixa</button>
   </div>
   <div class="card">
     <h2>Conectar a outro computador</h2>
@@ -45,7 +48,7 @@
   </div>
 </main>
 <section id="session">
-  <div id="bar"><button class="sec" id="disconnect">Desconectar</button><span id="peerInfo"></span></div>
+  <div id="bar"><button class="sec" id="disconnect">Desconectar</button><span id="peerInfo"></span><select id="monitor" style="display:none;padding:8px;border-radius:8px;background:#2c3040;color:#fff;border:0"></select></div>
   <div id="area">
     <div id="screenWrap"><video id="video" autoplay playsinline tabindex="0"></video></div>
     <aside id="files">

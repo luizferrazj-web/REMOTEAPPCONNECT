@@ -11,17 +11,22 @@ function createWindow() {
     minWidth: 760,
     minHeight: 520,
     title: 'IDEIA Remote',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 
+let selectedDisplayId = null;
+const currentDisplay = () => screen.getAllDisplays().find((d) => d.id === selectedDisplayId) || screen.getPrimaryDisplay();
+
 app.whenReady().then(() => {
-  // Compartilha a tela principal sem diálogo de seleção.
+  // Compartilha o monitor escolhido sem diálogo de seleção.
   session.defaultSession.setDisplayMediaRequestHandler(async (_req, callback) => {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    callback({ video: sources[0] });
+    const id = String(currentDisplay().id);
+    callback({ video: sources.find((s) => s.display_id === id) || sources[0] });
   });
   createWindow();
 });
@@ -34,14 +39,32 @@ const KEYS = {
   Delete: 'Delete', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
 };
 
+function resolveKey(k) {
+  const { Key } = nut;
+  if (KEYS[k]) return Key[KEYS[k]];
+  if (/^[a-z]$/i.test(k)) return Key[k.toUpperCase()];
+  if (/^\d$/.test(k)) return Key['Num' + k];
+  if (/^F\d{1,2}$/.test(k)) return Key[k];
+  return null;
+}
+
+ipcMain.handle('displays', () => {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d, i) => ({ id: d.id, name: `Monitor ${i + 1}${d.id === primary ? ' (principal)' : ''}` }));
+});
+
+ipcMain.handle('select-display', (_e, id) => { selectedDisplayId = id; });
+
 ipcMain.handle('input', async (_e, ev) => {
   if (!nut) return;
   const { Button, Point, keyboard, mouse, Key } = nut;
-  const d = screen.getPrimaryDisplay();
+  const d = currentDisplay();
   const sf = d.scaleFactor;
   try {
     if (ev.t === 'move' || ev.t === 'down' || ev.t === 'up') {
-      await mouse.setPosition(new Point(Math.round(ev.x * d.size.width * sf), Math.round(ev.y * d.size.height * sf)));
+      const x = d.bounds.x + ev.x * d.bounds.width;
+      const y = d.bounds.y + ev.y * d.bounds.height;
+      await mouse.setPosition(new Point(Math.round(x * sf), Math.round(y * sf)));
       const btn = ev.b === 2 ? Button.RIGHT : ev.b === 1 ? Button.MIDDLE : Button.LEFT;
       if (ev.t === 'down') await mouse.pressButton(btn);
       if (ev.t === 'up') await mouse.releaseButton(btn);
@@ -49,7 +72,16 @@ ipcMain.handle('input', async (_e, ev) => {
       if (ev.dy > 0) await mouse.scrollDown(Math.ceil(Math.abs(ev.dy) / 40));
       else if (ev.dy < 0) await mouse.scrollUp(Math.ceil(Math.abs(ev.dy) / 40));
     } else if (ev.t === 'key') {
-      if (KEYS[ev.k]) await keyboard.type(Key[KEYS[ev.k]]);
+      const key = resolveKey(ev.k);
+      const mods = [];
+      if (ev.ctrl) mods.push(Key.LeftControl);
+      if (ev.alt) mods.push(Key.LeftAlt);
+      if (ev.meta) mods.push(Key.LeftSuper);
+      if (ev.shift && (mods.length || (key && ev.k.length > 1))) mods.push(Key.LeftShift);
+      if (mods.length && key) {
+        await keyboard.pressKey(...mods, key);
+        await keyboard.releaseKey(...mods, key);
+      } else if (key) await keyboard.type(key);
       else if (ev.k.length === 1) await keyboard.type(ev.k);
     }
   } catch (err) { console.error('input error', err.message); }

@@ -6,6 +6,12 @@ const PORT = process.env.PORT || 8080;
 const wss = new WebSocketServer({ port: PORT });
 const peers = new Map(); // id -> socket
 
+// TURN opcional: TURN_URL=turn:host:3478 TURN_USER=... TURN_PASS=...
+const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+if (process.env.TURN_URL) {
+  iceServers.push({ urls: process.env.TURN_URL, username: process.env.TURN_USER, credential: process.env.TURN_PASS });
+}
+
 function newId() {
   let id;
   do { id = String(Math.floor(100000000 + Math.random() * 900000000)); } while (peers.has(id));
@@ -21,7 +27,7 @@ wss.on('connection', (ws) => {
       const wanted = /^\d{9}$/.test(msg.id || '') && !peers.has(msg.id) ? msg.id : newId();
       ws.id = wanted;
       peers.set(wanted, ws);
-      ws.send(JSON.stringify({ type: 'registered', id: wanted }));
+      ws.send(JSON.stringify({ type: 'registered', id: wanted, iceServers }));
     } else if (msg.type === 'signal' && ws.id) {
       const target = peers.get(msg.to);
       if (!target) return ws.send(JSON.stringify({ type: 'error', code: 'not-found', to: msg.to }));
