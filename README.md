@@ -1,52 +1,37 @@
 # IDEIA Remote
 
-Acesso remoto simples e gratuito (estilo AnyDesk) para Windows, macOS e Linux, com tela remota, controle e transferência de arquivos.
+Acesso remoto simples e gratuito (estilo AnyDesk) para Windows, macOS e Linux: tela remota, controle de mouse e teclado e transferência de arquivos.
+
+## Usar
+1. Baixe o instalador em **Releases** e instale nos dois computadores.
+2. No computador que será acessado, anote o **ID** e a **senha** mostrados no app.
+3. No outro, digite esse ID e a senha em "Conectar".
+
+Durante a sessão, arraste arquivos para o painel lateral (funciona nos dois sentidos); o que chega é salvo na pasta Downloads.
+
+Para acessar um computador sem ninguém por perto, defina uma **senha fixa** (mín. 8 caracteres) no cartão "Seu computador" e deixe o app aberto.
 
 ## Como funciona
-- `server/`: servidor de sinalização (WebSocket). Só faz o handshake; vídeo, controle e arquivos trafegam direto entre as máquinas (WebRTC P2P).
-- `app/`: aplicativo Electron. Cada máquina mostra um **ID** e uma **senha**; para acessar outra, digite o ID e a senha dela.
-- **Arquivos**: arraste para o painel lateral durante a sessão (funciona nos dois sentidos).
-
-## Pronto para usar (sem configuração)
-Por padrão o app usa o servidor público do PeerJS (`wss://0.peerjs.com`) só para o primeiro contato entre as máquinas: basta instalar nos dois lados e conectar pelo ID e senha. Não foi testado ao vivo no ambiente de desenvolvimento. Para ter seu próprio backend, use uma das opções abaixo.
-
-## Firebase (sem servidor próprio)
-O app usa o **Firebase Realtime Database** para o handshake, então funciona pela internet sem hospedar nada.
-1. Crie um projeto em https://console.firebase.google.com, ative **Authentication > Anônimo** e crie um **Realtime Database**.
-2. Publique as regras: `npm i -g firebase-tools && firebase login && firebase deploy --only database` (usa `firebase/database.rules.json`).
-3. Preencha `apiKey` e `databaseURL` em `app/src/firebase-config.js` e gere os instaladores.
-Sem essa configuração o app cai para o servidor WebSocket abaixo.
-
-## Executar
-```bash
-# 1) Servidor (em uma máquina acessível por todas)
-cd server && npm install && npm start
-
-# 2) App (em cada máquina)
-cd app && npm install && npm start
-```
-Por padrão o app usa `ws://localhost:8080`. Dê **duplo clique** no texto de status para informar o endereço do seu servidor (use `wss://` na internet).
-
-## Instaladores
-Baixe em **Releases** (`.exe`, `.dmg`, `.AppImage`/`.deb`). Para gerar:
-`cd app && npm run dist` (gera para o SO atual), ou rode o workflow **Build** no GitHub Actions para os três sistemas.
-
-## Permissões
-- **macOS**: autorizar *Gravação de Tela* e *Acessibilidade* em Ajustes do Sistema > Privacidade.
-- **Linux**: captura/controle funcionam melhor em X11 (Wayland é limitado).
-
-## Acesso sem supervisão
-No cartão "Seu computador", defina uma **senha fixa** (mín. 8 caracteres) e deixe o app aberto: você conecta sempre com o mesmo ID e essa senha. Ela fica salva localmente no app.
-
-## Hospedar servidor + TURN (Docker)
-```bash
-cd deploy && cp .env.example .env   # edite PUBLIC_HOST, TURN_USER, TURN_PASS
-docker compose up -d
-```
-Sobe a sinalização (porta 8080) e um coturn (3478 e UDP 49160-49200). Os apps recebem a config TURN automaticamente do servidor. Para internet, coloque um proxy TLS (ex.: Caddy/nginx) na frente da 8080 e use `wss://`.
-
-## Vários monitores e atalhos
-Com mais de um monitor na máquina remota, aparece um seletor na barra da sessão. Atalhos com Ctrl/Alt/Meta/Shift são repassados (ex.: Ctrl+C).
+- As máquinas se encontram por um servidor de sinalização. Por padrão é o serviço público gratuito do [PeerJS](https://peerjs.com), usado pela biblioteca oficial `peerjs`; ele não tem garantia de disponibilidade.
+- Depois disso a conexão é direta entre as duas máquinas (WebRTC, criptografada): tela, controle e arquivos não passam pelo servidor.
+- A senha nunca é enviada: o app prova que a conhece com um hash amarrado às chaves daquela conexão. Cinco senhas erradas em 10 minutos bloqueiam novas tentativas.
 
 ## Limitações
-Teclas de mídia e algumas combinações do sistema não são repassadas; no Linux Wayland captura/controle são limitados; monitores com escalas DPI diferentes podem ter o mouse levemente impreciso.
+- **Sem retransmissor (TURN)**: se a rede de um dos lados bloquear conexões diretas (algumas redes 4G/5G, corporativas ou com CGNAT), a conexão não fecha. A solução é configurar um TURN em `app/src/config.js`.
+- **macOS**: é preciso autorizar *Gravação de Tela* e *Acessibilidade* (o app avisa). O instalador é só para Apple Silicon e não é assinado pela Apple: na primeira vez, abra com botão direito > Abrir.
+- **Windows**: o instalador não é assinado; o SmartScreen pede "Mais informações > Executar assim mesmo".
+- **Linux**: captura e controle funcionam em X11; em Wayland são limitados.
+- Teclas de mídia e alguns atalhos do sistema não são repassados.
+
+## Desenvolvimento
+```bash
+cd app
+npm install
+npm start          # abre o app
+npm test           # teste ponta a ponta com dois apps e um servidor local
+npm run dist       # gera o instalador do sistema atual
+```
+`SIGNALING=public npm test` roda o mesmo teste pelo serviço público. O workflow **Build** gera os instaladores dos três sistemas, testa o app empacotado e, em tags `v*`, anexa tudo à Release.
+
+## Servidor próprio (opcional)
+`deploy/docker-compose.yml` sobe um PeerServer (porta 9000) e um coturn. Depois aponte `server` e `iceServers` em `app/src/config.js` para ele. Esta configuração ainda não foi testada.

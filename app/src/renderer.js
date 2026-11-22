@@ -1,5 +1,4 @@
 const $ = (id) => document.getElementById(id);
-let ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const CHUNK = 16 * 1024;
 
 const password = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
@@ -11,132 +10,185 @@ $('saveFixed').onclick = () => {
   if (v) localStorage.setItem('fixedPass', v); else localStorage.removeItem('fixedPass');
   alert(v ? 'Senha fixa salva.' : 'Senha fixa removida.');
 };
+const cfg = window.IDEIA_CONFIG;
+const PREFIX = 'ideia-remote-';
+const serverUrl = localStorage.getItem('server') || cfg.server;
+
 $('status').addEventListener('dblclick', () => {
-  if ((window.IDEIA_CONFIG.firebase || {}).apiKey) return;
-  const s = prompt('Endereço do servidor de sinalização', localStorage.getItem('server') || 'ws://localhost:8080');
-  if (s) { localStorage.setItem('server', s); location.reload(); }
+  const s = prompt('Endereço do servidor de sinalização (vazio = serviço público)', serverUrl || '');
+  if (s === null) return;
+  if (s) localStorage.setItem('server', s); else localStorage.removeItem('server');
+  location.reload();
 });
 
-let myId, pc, ctrl, fileCh, isHost = false, peerId = null, hostDisplays = null, waitTimer;
-let remoteSet = false, pendingIce = [];
+// peer: ligação com o servidor de sinalização. conn: canal de controle da sessão atual.
+// pc: a conexão direta entre as máquinas, por onde passam tela, controle e arquivos.
+let peer, myId, conn, pc, fileCh, isHost = false, peerId = null, waitTimer;
+const failures = [];
 
-const transport = window.createTransport({
-  onStatus: (t) => { $('status').textContent = t; },
-  onRegistered: (id, iceServers) => {
-    myId = id;
-    if (iceServers && iceServers.length) ICE = { iceServers };
-    localStorage.setItem('id', id);
-    $('myId').textContent = id.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
+function peerOptions() {
+  const o = { debug: 0, config: { iceServers: cfg.iceServers } };
+  if (serverUrl) {
+    const u = new URL(serverUrl);
+    o.secure = u.protocol === 'wss:' || u.protocol === 'https:';
+    o.host = u.hostname;
+    o.port = Number(u.port) || (o.secure ? 443 : 80);
+    o.path = u.pathname || '/';
+  }
+  return o;
+}
+
+function startPeer() {
+  const saved = localStorage.getItem('id');
+  myId = /^\d{9}$/.test(saved || '') ? saved : String(Math.floor(100000000 + Math.random() * 900000000));
+  $('status').textContent = 'Conectando ao servidor…';
+  peer = new Peer(PREFIX + myId, peerOptions());
+  peer.on('open', () => {
+    localStorage.setItem('id', myId);
+    $('myId').textContent = myId.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
     $('status').textContent = 'Pronto';
-  },
-  onError: () => { if (pc && !isHost && pc.connectionState !== 'connected') fail('ID não encontrado ou computador offline.'); },
-  onSignal: (from, data) => onSignal(from, data).catch((err) => console.error('sinalização', err)),
-});
-const send = (to, data) => transport.send(to, data);
+  });
+  peer.on('connection', onIncoming);
+  peer.on('disconnected', () => {
+    $('status').textContent = 'Sem conexão com o servidor — reconectando…';
+    setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 3000);
+  });
+  peer.on('close', () => {
+    $('status').textContent = 'Sem conexão com o servidor — reconectando…';
+    setTimeout(startPeer, 4000);
+  });
+  peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') { localStorage.removeItem('id'); peer.destroy(); }
+    else if (err.type === 'peer-unavailable') { if (conn && !isHost && !pc) fail('ID não encontrado ou computador offline.'); }
+    else console.error('servidor de sinalização:', err.type);
+  });
+}
 
-async function proof(pass, sdp) {
-  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${pass}\n${sdp}`));
+async function sha256(text) {
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return Array.from(new Uint8Array(h), (x) => x.toString(16).padStart(2, '0')).join('');
+}
+const fingerprint = (desc) => (desc.sdp.match(/a=fingerprint:(\S+ \S+)/) || [])[1];
+
+// A prova amarra a senha às chaves desta conexão: um intermediário não consegue reaproveitá-la.
+function proof(pass, nonce, rtc, viewerSide) {
+  const local = fingerprint(rtc.currentLocalDescription), remote = fingerprint(rtc.currentRemoteDescription);
+  if (!local || !remote) throw new Error('conexão sem impressão digital');
+  return sha256([pass, nonce, viewerSide ? local : remote, viewerSide ? remote : local].join('\n'));
 }
 
 const setOverlay = (text) => { $('overlay').textContent = text; $('overlay').style.display = text ? 'flex' : 'none'; };
+const sendCtrl = (obj) => { if (conn && conn.open) conn.send(obj); };
 
 function fail(message) {
   endSession();
   alert(message);
 }
 
-function newPC(remote) {
-  const policy = localStorage.getItem('icePolicy') === 'relay' ? 'relay' : 'all';
-  pc = new RTCPeerConnection({ ...ICE, iceTransportPolicy: policy });
-  peerId = remote;
-  remoteSet = false;
-  pendingIce = [];
-  const mine = pc;
-  pc.onicecandidate = (e) => e.candidate && send(remote, { kind: 'ice', candidate: e.candidate.toJSON() });
-  pc.onconnectionstatechange = () => {
-    if (pc !== mine) return;
-    const s = pc.connectionState;
-    if (s === 'connected') { clearTimeout(waitTimer); if (!isHost) setOverlay($('video').videoWidth ? '' : 'Carregando a tela…'); }
-    else if (s === 'disconnected') setOverlay('Conexão instável — reconectando…');
-    else if (s === 'failed') fail('Não foi possível conectar: a rede de um dos computadores bloqueou a conexão.');
-  };
-}
+const NETWORK_FAIL = 'Não foi possível conectar: a rede de um dos computadores bloqueou a conexão direta.';
 
-// Candidatos podem chegar antes da descrição remota; guarda e aplica depois.
-async function applyRemote(desc) {
-  await pc.setRemoteDescription(desc);
-  remoteSet = true;
-  pendingIce.splice(0).forEach((c) => pc.addIceCandidate(c).catch(() => {}));
-}
+// ---- Lado que é acessado ----
+function onIncoming(c) {
+  const from = c.peer.slice(PREFIX.length);
+  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
+  let authed = false;
+  const deny = (reason) => { c.send({ kind: 'denied', reason }); setTimeout(() => c.close(), 500); };
 
-async function onSignal(from, d) {
-  if (d.kind === 'offer') {
-    if (pc) return send(from, { kind: 'denied', reason: 'Máquina ocupada.' });
-    isHost = true;
-    newPC(from);
-    const mine = pc;
-    pc.ondatachannel = (e) => (e.channel.label === 'ctrl' ? setupCtrl(e.channel) : setupFile(e.channel));
+  c.on('open', () => {
+    const recent = failures.filter((t) => Date.now() - t < 10 * 60 * 1000);
+    if (conn) return deny('Máquina ocupada.');
+    if (recent.length >= 5) return deny('Muitas tentativas com senha errada. Aguarde alguns minutos.');
+    c.send({ kind: 'challenge', nonce });
+  });
+  c.on('data', async (m) => {
+    if (authed) return onCtrl(m);
+    if (m.kind !== 'auth') return;
     const fixed = localStorage.getItem('fixedPass');
-    const ok = d.proof === await proof(password, d.sdp) || (!!fixed && d.proof === await proof(fixed, d.sdp));
-    if (pc !== mine) return;
-    if (!ok) { endSession(); return send(from, { kind: 'denied', reason: 'Senha incorreta.' }); }
+    const rtc = c.peerConnection;
+    const ok = m.proof === await proof(password, nonce, rtc, false) || (!!fixed && m.proof === await proof(fixed, nonce, rtc, false));
+    if (!ok) { failures.push(Date.now()); return deny('Senha incorreta.'); }
+    if (conn) return deny('Máquina ocupada.');
+    authed = true;
+    isHost = true;
+    conn = c;
+    pc = rtc;
+    peerId = from;
+    watchConnection();
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
-      if (pc !== mine) return stream.getTracks().forEach((t) => t.stop());
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
     } catch (err) {
-      endSession();
-      return send(from, { kind: 'denied', reason: 'O computador remoto não conseguiu capturar a tela (verifique as permissões de gravação de tela).' });
+      conn = pc = peerId = null;
+      return deny('O computador remoto não conseguiu capturar a tela (verifique a permissão de gravação de tela).');
     }
-    await applyRemote({ type: 'offer', sdp: d.sdp });
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    send(from, { kind: 'answer', sdp: answer.sdp });
+    if (conn !== c) return stream.getTracks().forEach((t) => t.stop());
+    c.send({ kind: 'ok', displays: await window.native.displays() });
+    setupFile(pc.createDataChannel('file'));
+    stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    c.send({ kind: 'sdp', desc: { type: offer.type, sdp: offer.sdp } });
     showSession(`Sua tela está sendo acessada por ${from}`);
-    window.native.displays().then((list) => (ctrl && ctrl.readyState === 'open' ? ctrl.send(JSON.stringify({ kind: 'displays', list })) : (hostDisplays = list)));
-  } else if (!pc || from !== peerId) {
-    return;
-  } else if (d.kind === 'answer' && !isHost) {
-    clearTimeout(waitTimer);
-    waitTimer = setTimeout(() => fail('Não foi possível conectar: a rede de um dos computadores bloqueou a conexão.'), 30000);
-    await applyRemote({ type: 'answer', sdp: d.sdp });
-  } else if (d.kind === 'ice') {
-    if (remoteSet) pc.addIceCandidate(d.candidate).catch(() => {});
-    else pendingIce.push(d.candidate);
-  } else if (d.kind === 'denied' && !isHost) {
-    fail(d.reason);
-  }
+  });
+  c.on('close', () => { if (conn === c) endSession(); });
 }
 
-$('connect').onclick = async () => {
+// ---- Lado que acessa ----
+$('connect').onclick = () => {
   const to = $('remoteId').value.replace(/\s/g, '');
   if (!/^\d{9}$/.test(to)) return alert('Digite um ID de 9 dígitos.');
   if (to === myId) return alert('Esse é o ID deste computador. Digite o ID do outro.');
-  if (pc) return;
+  if (conn) return;
+  if (!peer || !peer.open) return alert('Ainda sem conexão com o servidor. Aguarde aparecer "Pronto" e tente de novo.');
+  const pass = $('remotePass').value.trim();
   isHost = false;
-  newPC(to);
-  pc.addTransceiver('video', { direction: 'recvonly' });
-  pc.ontrack = (e) => {
-    const v = $('video');
-    v.srcObject = e.streams[0] || new MediaStream([e.track]);
-    v.onloadeddata = () => setOverlay('');
-    v.play().catch(() => {});
-  };
-  setupCtrl(pc.createDataChannel('ctrl'));
-  setupFile(pc.createDataChannel('file'));
+  peerId = to;
+  const c = peer.connect(PREFIX + to, { reliable: true, serialization: 'json' });
+  conn = c;
   showSession(`Conectado a ${to}`);
   setOverlay('Conectando…');
-  bindInput();
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  send(to, { kind: 'offer', sdp: offer.sdp, proof: await proof($('remotePass').value.trim(), offer.sdp) });
-  waitTimer = setTimeout(() => fail('Sem resposta: o outro computador está offline ou com o app fechado.'), 20000);
+  waitTimer = setTimeout(() => fail('Sem resposta: o outro computador está offline, com o app fechado, ou a rede bloqueou a conexão.'), 30000);
+
+  c.on('data', async (m) => {
+    if (conn !== c) return;
+    if (m.kind === 'challenge') {
+      const rtc = c.peerConnection;
+      rtc.ondatachannel = (e) => { if (e.channel.label === 'file') setupFile(e.channel); };
+      rtc.ontrack = (e) => {
+        const v = $('video');
+        v.srcObject = e.streams[0] || new MediaStream([e.track]);
+        v.onloadeddata = () => setOverlay('');
+        v.play().catch(() => {});
+      };
+      c.send({ kind: 'auth', proof: await proof(pass, m.nonce, rtc, true) });
+    } else if (m.kind === 'denied') {
+      fail(m.reason);
+    } else if (m.kind === 'ok') {
+      clearTimeout(waitTimer);
+      pc = c.peerConnection;
+      watchConnection();
+      setOverlay('Carregando a tela…');
+      showDisplays(m.displays);
+      bindInput();
+    } else if (pc) onCtrl(m);
+  });
+  c.on('error', () => { if (conn === c && !pc) fail(NETWORK_FAIL); });
+  c.on('close', () => { if (conn === c) endSession(); });
 };
 
+function watchConnection() {
+  const mine = pc;
+  mine.addEventListener('connectionstatechange', () => {
+    if (pc !== mine) return;
+    if (mine.connectionState === 'disconnected') setOverlay('Conexão instável — reconectando…');
+    else if (mine.connectionState === 'connected' && $('video').videoWidth) setOverlay('');
+    else if (mine.connectionState === 'failed') fail('A conexão caiu.');
+  });
+}
+
 $('disconnect').onclick = () => {
-  if (ctrl && ctrl.readyState === 'open') ctrl.send(JSON.stringify({ kind: 'bye' }));
-  setTimeout(endSession, 100);
+  sendCtrl({ kind: 'bye' });
+  setTimeout(endSession, 150);
 };
 
 function showSession(text) {
@@ -149,45 +201,45 @@ function showSession(text) {
 
 function endSession() {
   clearTimeout(waitTimer);
-  if (pc) {
-    pc.getSenders().forEach((s) => s.track && s.track.stop());
-    pc.close();
-  }
-  pc = ctrl = fileCh = peerId = null;
+  const c = conn, old = pc;
+  conn = pc = fileCh = peerId = null;
+  if (old) old.getSenders().forEach((s) => s.track && s.track.stop());
+  if (c) c.close();
   $('video').srcObject = null;
   setOverlay('');
   $('monitor').style.display = 'none';
-  hostDisplays = null;
   $('session').style.display = 'none';
   $('home').style.display = 'flex';
   $('log').innerHTML = '';
 }
 
-// ---- Controle remoto ----
-function setupCtrl(ch) {
-  ctrl = ch;
-  ch.onopen = () => {
-    if (isHost && hostDisplays) ch.send(JSON.stringify({ kind: 'displays', list: hostDisplays }));
-  };
-  ch.onclose = () => { if (ctrl === ch) endSession(); };
-  ch.onmessage = async (e) => {
-    const m = JSON.parse(e.data);
-    if (m.kind === 'bye') endSession();
-    else if (m.kind === 'displays' && !isHost) {
-      const sel = $('monitor');
-      sel.innerHTML = '';
-      m.list.forEach((d) => sel.add(new Option(d.name, d.id)));
-      sel.style.display = m.list.length > 1 ? '' : 'none';
-      sel.onchange = () => ctrl.send(JSON.stringify({ kind: 'display', id: Number(sel.value) }));
-    } else if (m.kind === 'display' && isHost) {
-      await window.native.selectDisplay(m.id);
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-        if (sender) { const old = sender.track; await sender.replaceTrack(stream.getVideoTracks()[0]); old.stop(); }
-      } catch { /* mantém o monitor atual */ }
-    } else if (m.t && isHost && $('allowControl').checked) window.native.input(m);
-  };
+function showDisplays(list) {
+  const sel = $('monitor');
+  sel.innerHTML = '';
+  list.forEach((d) => sel.add(new Option(d.name, d.id)));
+  sel.style.display = list.length > 1 ? '' : 'none';
+  sel.onchange = () => sendCtrl({ kind: 'display', id: Number(sel.value) });
+}
+
+// ---- Mensagens de controle (já autenticadas) ----
+async function onCtrl(m) {
+  if (m.kind === 'bye') endSession();
+  else if (m.kind === 'sdp') {
+    // A tela entra na mesma conexão já autenticada; a negociação passa pelo próprio canal.
+    await pc.setRemoteDescription(m.desc);
+    if (m.desc.type === 'offer') {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sendCtrl({ kind: 'sdp', desc: { type: answer.type, sdp: answer.sdp } });
+    }
+  } else if (m.kind === 'display' && isHost) {
+    await window.native.selectDisplay(m.id);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+      if (sender) { const old = sender.track; await sender.replaceTrack(stream.getVideoTracks()[0]); old.stop(); }
+    } catch { /* mantém o monitor atual */ }
+  } else if (m.t && isHost && $('allowControl').checked) window.native.input(m);
 }
 
 function bindInput() {
@@ -200,7 +252,7 @@ function bindInput() {
     const ox = (r.width - w) / 2, oy = (r.height - h) / 2;
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left - ox) / w)), y: Math.min(1, Math.max(0, (e.clientY - r.top - oy) / h)) };
   };
-  const emit = (o) => ctrl && ctrl.readyState === 'open' && ctrl.send(JSON.stringify(o));
+  const emit = sendCtrl;
   let last = 0;
   v.onmousemove = (e) => { if (Date.now() - last > 30) { last = Date.now(); emit({ t: 'move', ...norm(e) }); } };
   v.onmousedown = (e) => { v.focus(); emit({ t: 'down', b: e.button, ...norm(e) }); };
@@ -292,4 +344,4 @@ window.native.status().then((s) => {
   if (s.platform === 'darwin') $('warn').onclick = () => window.native.openPrivacy();
 });
 
-transport.start();
+startPeer();

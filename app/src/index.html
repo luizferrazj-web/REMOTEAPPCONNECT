@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src ws: wss: https://*.googleapis.com https://*.firebaseio.com https://*.firebasedatabase.app; img-src 'self' data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src ws: wss:; img-src 'self' data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'">
 <title>IDEIA Remote</title>
 <style>
   * { box-sizing: border-box; }
@@ -61,8 +61,8 @@
     </aside>
   </div>
 </section>
-<script src="firebase-config.js"></script>
-<script src="signaling.js"></script>
+<script src="config.js"></script>
+<script src="../node_modules/peerjs/dist/peerjs.min.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>

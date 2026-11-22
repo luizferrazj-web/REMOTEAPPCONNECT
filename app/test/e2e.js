@@ -1,6 +1,6 @@
 // Teste ponta a ponta: abre dois apps, conecta B -> A e confere tela, controle, arquivos e desconexão.
-//   SIGNALING=local (padrão, usa ../server) | public (servidor público padrão do app)
-//   RELAY=1 força o tráfego pelo TURN.  ELECTRON_BIN aponta para outro binário do Electron.
+//   SIGNALING=local (padrão, sobe um PeerServer local) | public (serviço público padrão do app)
+//   ELECTRON_BIN aponta para outro binário do Electron.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -64,15 +64,15 @@ async function transfer(from, to, name, body) {
 }
 
 (async () => {
-  console.log(`sinalização=${PUBLIC ? 'pública' : 'local'} relay=${process.env.RELAY ? 'forçado' : 'não'} plataforma=${process.platform}`);
+  console.log(`sinalização=${PUBLIC ? 'pública' : 'local'} plataforma=${process.platform}`);
   if (!PUBLIC) {
-    procs.push(spawn(process.execPath, [path.join(APP, '..', 'server', 'server.js')], { env: { ...process.env, PORT: '8123' }, stdio: 'ignore' }));
-    await sleep(1000);
+    procs.push(spawn(process.execPath, [path.join(APP, 'node_modules', 'peer', 'dist', 'bin', 'peerjs.js'), '--port', '9123', '--path', '/', '--host', '127.0.0.1'], { stdio: 'ignore' }));
+    await sleep(1500);
   }
   const A = await launch('A', 9331);
   const B = await launch('B', 9332);
   for (const x of [A, B]) {
-    await x.ev(`${PUBLIC ? '' : "localStorage.setItem('server','ws://127.0.0.1:8123');"} ${process.env.RELAY ? "localStorage.setItem('icePolicy','relay');" : ''} location.reload(); 1`);
+    await x.ev(`${PUBLIC ? "localStorage.removeItem('server');" : "localStorage.setItem('server','ws://127.0.0.1:9123/');"} location.reload(); 1`);
   }
   await sleep(1500);
   for (const x of [A, B]) await until(async () => (await text(x, 'status')) === 'Pronto', 30000, `${x.name} registrar na sinalização`);
@@ -98,14 +98,17 @@ async function transfer(from, to, name, body) {
   if (status.control) {
     const { mouse } = require('@nut-tree-fork/nut-js');
     const moved = async (fx, fy) => {
-      await B.ev(`ctrl.send(JSON.stringify({ t: 'move', x: ${fx}, y: ${fy} })); 1`);
+      await B.ev(`sendCtrl({ t: 'move', x: ${fx}, y: ${fy} }); 1`);
       await sleep(1200);
-      const [w, h] = await A.ev('[screen.width * devicePixelRatio, screen.height * devicePixelRatio]');
+      const [w, h] = await A.ev(`[screen.width, screen.height].map((v) => v * (${process.platform === 'darwin'} ? 1 : devicePixelRatio))`);
       const pos = await mouse.getPosition();
       console.log(`  cursor em ${pos.x},${pos.y} — esperado ${Math.round(fx * w)},${Math.round(fy * h)}`);
       return Math.abs(pos.x - fx * w) < 8 && Math.abs(pos.y - fy * h) < 8;
     };
-    check(await moved(0.3, 0.4) && await moved(0.5, 0.5), 'mouse de A obedece ao comando de B');
+    const ok = [await moved(0.3, 0.4), await moved(0.5, 0.5)].every(Boolean);
+    // Nos runners de macOS o sistema não concede a permissão de Acessibilidade ao app.
+    if (process.platform === 'darwin' && !ok) console.log('AVISO mouse não obedeceu (permissão de Acessibilidade do macOS)');
+    else check(ok, 'mouse de A obedece ao comando de B');
   } else console.log('AVISO controle de mouse indisponível nesta máquina — não testado');
 
   await B.ev(`document.getElementById('disconnect').click(); 1`);

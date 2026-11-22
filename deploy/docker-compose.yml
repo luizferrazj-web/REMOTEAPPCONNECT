@@ -1,14 +1,12 @@
+# Servidor próprio (opcional): sinalização PeerServer + retransmissor TURN.
 # Uso: cp .env.example .env (edite) && docker compose up -d
 services:
-  signaling:
-    build: ../server
+  peerserver:
+    image: peerjs/peerjs-server
     restart: always
-    environment:
-      TURN_URL: turn:${PUBLIC_HOST}:3478
-      TURN_USER: ${TURN_USER}
-      TURN_PASS: ${TURN_PASS}
+    command: ["--port", "9000", "--path", "/"]
     ports:
-      - "8080:8080"
+      - "9000:9000"
   coturn:
     image: coturn/coturn:latest
     restart: always

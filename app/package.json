@@ -10,11 +10,13 @@
     "test": "node test/e2e.js"
   },
   "dependencies": {
-    "@nut-tree-fork/nut-js": "^4.2.0"
+    "@nut-tree-fork/nut-js": "^4.2.0",
+    "peerjs": "^1.5.5"
   },
   "devDependencies": {
     "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "peer": "^1.0.2"
   },
   "build": {
     "appId": "com.ideia.remote",
@@ -27,7 +29,8 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "identity": "-"
     },
     "win": {
       "target": [
@@ -42,7 +45,20 @@
       "category": "Utility",
       "maintainer": "IDEIA <luizferrazj-web@users.noreply.github.com>"
     },
-    "publish": null
+    "publish": null,
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
+    }
   },
   "author": "IDEIA <luizferrazj-web@users.noreply.github.com>",
   "homepage": "https://github.com/luizferrazj-web/REMOTEAPPCONNECT"

@@ -5,6 +5,10 @@ const fs = require('fs');
 let nut = null;
 try { nut = require('@nut-tree-fork/nut-js'); nut.mouse.config.mouseSpeed = 100000; } catch { /* controle indisponível */ }
 
+// Sem isto o Chromium esconde os IPs locais atrás de nomes mDNS, que falham em várias redes
+// e impedem a conexão entre máquinas da mesma rede.
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
@@ -72,7 +76,8 @@ ipcMain.handle('input', async (_e, ev) => {
   if (!nut) return;
   const { Button, Point, keyboard, mouse, Key } = nut;
   const d = currentDisplay();
-  const sf = d.scaleFactor;
+  // No macOS o cursor é posicionado em pontos; nos demais, em pixels físicos.
+  const sf = process.platform === 'darwin' ? 1 : d.scaleFactor;
   try {
     if (ev.t === 'move' || ev.t === 'down' || ev.t === 'up') {
       const x = d.bounds.x + ev.x * d.bounds.width;

@@ -11,11 +11,19 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            bin: dist/win-unpacked/IDEIA Remote.exe
+          - os: ubuntu-latest
+            bin: dist/linux-unpacked/ideia-remote
+          - os: macos-latest
+            bin: dist/mac-arm64/IDEIA Remote.app/Contents/MacOS/IDEIA Remote
     runs-on: ${{ matrix.os }}
     defaults:
       run:
+        shell: bash
         working-directory: app
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +32,18 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npx electron-builder --publish never
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libxtst6
+      - if: runner.os == 'macOS'
+        run: codesign --verify --deep --verbose=2 "dist/mac-arm64/IDEIA Remote.app"
+      # Conecta dois apps já empacotados pelo serviço público antes de publicar.
+      # No macOS o runner não concede gravação de tela ao app empacotado, então lá o teste só informa.
+      - name: Testar o app empacotado
+        continue-on-error: ${{ runner.os == 'macOS' }}
+        env:
+          SIGNALING: public
+          ELECTRON_BIN: ${{ github.workspace }}/app/${{ matrix.bin }}
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }} node test/e2e.js
       - uses: actions/upload-artifact@v4
         with:
           name: ideia-remote-${{ matrix.os }}
