@@ -30,7 +30,7 @@
         "dmg"
       ],
       "category": "public.app-category.utilities",
-      "identity": "-"
+      "identity": null
     },
     "win": {
       "target": [
@@ -58,7 +58,8 @@
         "libuuid1",
         "libsecret-1-0"
       ]
-    }
+    },
+    "afterPack": "build/after-pack.js"
   },
   "author": "IDEIA <luizferrazj-web@users.noreply.github.com>",
   "homepage": "https://github.com/luizferrazj-web/REMOTEAPPCONNECT"

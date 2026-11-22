@@ -97,6 +97,9 @@ async function transfer(from, to, name, body) {
 
   if (status.control) {
     const { mouse } = require('@nut-tree-fork/nut-js');
+    // Os dois apps dividem a mesma tela: sem isto, o cursor movido por A passa sobre o vídeo
+    // em B, que reenvia a posição e desloca o cursor de novo.
+    await B.ev(`document.getElementById('video').onmousemove = null; 1`);
     const moved = async (fx, fy) => {
       await B.ev(`sendCtrl({ t: 'move', x: ${fx}, y: ${fy} }); 1`);
       const [w, h] = await A.ev(`[screen.width, screen.height].map((v) => v * (${process.platform === 'darwin'} ? 1 : devicePixelRatio))`);
@@ -110,9 +113,7 @@ async function transfer(from, to, name, body) {
       return false;
     };
     const ok = [await moved(0.3, 0.4), await moved(0.5, 0.5), await moved(0.2, 0.6)].every(Boolean);
-    // Nos runners de macOS a permissão de Acessibilidade pode não estar concedida ao app.
-    if (process.platform === 'darwin' && !ok) console.log('AVISO mouse não obedeceu (permissão de Acessibilidade do macOS)');
-    else check(ok, 'mouse de A obedece ao comando de B');
+    check(ok, 'mouse de A obedece ao comando de B');
   } else console.log('AVISO controle de mouse indisponível nesta máquina — não testado');
 
   await B.ev(`document.getElementById('disconnect').click(); 1`);
