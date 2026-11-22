@@ -99,14 +99,18 @@ async function transfer(from, to, name, body) {
     const { mouse } = require('@nut-tree-fork/nut-js');
     const moved = async (fx, fy) => {
       await B.ev(`sendCtrl({ t: 'move', x: ${fx}, y: ${fy} }); 1`);
-      await sleep(1200);
       const [w, h] = await A.ev(`[screen.width, screen.height].map((v) => v * (${process.platform === 'darwin'} ? 1 : devicePixelRatio))`);
-      const pos = await mouse.getPosition();
+      let pos;
+      for (let i = 0; i < 20; i++) {
+        await sleep(300);
+        pos = await mouse.getPosition();
+        if (Math.abs(pos.x - fx * w) < 8 && Math.abs(pos.y - fy * h) < 8) return true;
+      }
       console.log(`  cursor em ${pos.x},${pos.y} — esperado ${Math.round(fx * w)},${Math.round(fy * h)}`);
-      return Math.abs(pos.x - fx * w) < 8 && Math.abs(pos.y - fy * h) < 8;
+      return false;
     };
-    const ok = [await moved(0.3, 0.4), await moved(0.5, 0.5)].every(Boolean);
-    // Nos runners de macOS o sistema não concede a permissão de Acessibilidade ao app.
+    const ok = [await moved(0.3, 0.4), await moved(0.5, 0.5), await moved(0.2, 0.6)].every(Boolean);
+    // Nos runners de macOS a permissão de Acessibilidade pode não estar concedida ao app.
     if (process.platform === 'darwin' && !ok) console.log('AVISO mouse não obedeceu (permissão de Acessibilidade do macOS)');
     else check(ok, 'mouse de A obedece ao comando de B');
   } else console.log('AVISO controle de mouse indisponível nesta máquina — não testado');

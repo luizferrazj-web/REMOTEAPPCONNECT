@@ -14,8 +14,6 @@ jobs:
       run:
         shell: bash
         working-directory: app
-    env:
-      XVFB: ${{ matrix.os == 'ubuntu-latest' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,9 +23,9 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb libxtst6
       - name: Servidor local
-        run: $XVFB node test/e2e.js
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }} node test/e2e.js
       - name: Serviço público
         if: always()
         env:
           SIGNALING: public
-        run: $XVFB node test/e2e.js
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }} node test/e2e.js
