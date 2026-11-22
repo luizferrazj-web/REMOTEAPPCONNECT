@@ -95,6 +95,35 @@
     return { start, send };
   }
 
+  // Servidor público do PeerJS: funciona na internet sem conta nem configuração.
+  function publicTransport(h) {
+    const host = cfg.publicSignaling || 'wss://0.peerjs.com/peerjs?key=peerjs';
+    let ws, myId, hb, tries = 0;
+    const token = Math.random().toString(36).slice(2);
+    function start() {
+      clearInterval(hb);
+      myId = tries++ === 0 && /^\d{9}$/.test(localStorage.getItem('id') || '') ? localStorage.getItem('id') : randomId();
+      const sock = new WebSocket(`${host}&id=${myId}&token=${token}`);
+      ws = sock;
+      sock.onclose = () => {
+        if (sock.taken || ws !== sock) return;
+        clearInterval(hb);
+        h.onStatus('Servidor offline — tentando de novo…');
+        setTimeout(start, 3000);
+      };
+      sock.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.type === 'OPEN') {
+          h.onRegistered(myId, cfg.iceServers);
+          hb = setInterval(() => sock.readyState === 1 && sock.send(JSON.stringify({ type: 'HEARTBEAT' })), 5000);
+        } else if (m.type === 'ID-TAKEN') { sock.taken = true; start(); }
+        else if (m.type === 'EXPIRE') h.onError('not-found');
+        else if (m.type === 'OFFER') h.onSignal(m.src, m.payload);
+      };
+    }
+    return { start, send: (to, data) => ws.send(JSON.stringify({ type: 'OFFER', dst: to, payload: data })) };
+  }
+
   function wsTransport(h) {
     const server = localStorage.getItem('server') || cfg.wsServer || 'ws://localhost:8080';
     let ws;
@@ -112,5 +141,9 @@
     return { start, send: (to, data) => ws.send(JSON.stringify({ type: 'signal', to, data })) };
   }
 
-  window.createTransport = (h) => (fb.apiKey && fb.databaseURL ? firebaseTransport(h) : wsTransport(h));
+  window.createTransport = (h) => {
+    if (fb.apiKey && fb.databaseURL) return firebaseTransport(h);
+    if (cfg.wsServer || localStorage.getItem('server')) return wsTransport(h);
+    return publicTransport(h);
+  };
 })();

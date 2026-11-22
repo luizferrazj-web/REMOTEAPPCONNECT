@@ -7,6 +7,9 @@ Acesso remoto simples e gratuito (estilo AnyDesk) para Windows, macOS e Linux, c
 - `app/`: aplicativo Electron. Cada máquina mostra um **ID** e uma **senha**; para acessar outra, digite o ID e a senha dela.
 - **Arquivos**: arraste para o painel lateral durante a sessão (funciona nos dois sentidos).
 
+## Pronto para usar (sem configuração)
+Por padrão o app usa o servidor público do PeerJS (`wss://0.peerjs.com`) só para o primeiro contato entre as máquinas: basta instalar nos dois lados e conectar pelo ID e senha. Não foi testado ao vivo no ambiente de desenvolvimento. Para ter seu próprio backend, use uma das opções abaixo.
+
 ## Firebase (sem servidor próprio)
 O app usa o **Firebase Realtime Database** para o handshake, então funciona pela internet sem hospedar nada.
 1. Crie um projeto em https://console.firebase.google.com, ative **Authentication > Anônimo** e crie um **Realtime Database**.
