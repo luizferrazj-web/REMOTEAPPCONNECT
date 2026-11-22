@@ -18,9 +18,31 @@
   "build": {
     "appId": "com.ideia.remote",
     "productName": "IDEIA Remote",
-    "files": ["src/**/*", "package.json"],
-    "mac": { "target": ["dmg"], "category": "public.app-category.utilities" },
-    "win": { "target": ["nsis"] },
-    "linux": { "target": ["AppImage", "deb"], "category": "Utility" }
-  }
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "maintainer": "IDEIA <luizferrazj-web@users.noreply.github.com>"
+    },
+    "publish": null
+  },
+  "author": "IDEIA <luizferrazj-web@users.noreply.github.com>",
+  "homepage": "https://github.com/luizferrazj-web/IDEIA01"
 }

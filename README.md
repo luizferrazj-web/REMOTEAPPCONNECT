@@ -7,6 +7,13 @@ Acesso remoto simples e gratuito (estilo AnyDesk) para Windows, macOS e Linux, c
 - `app/`: aplicativo Electron. Cada máquina mostra um **ID** e uma **senha**; para acessar outra, digite o ID e a senha dela.
 - **Arquivos**: arraste para o painel lateral durante a sessão (funciona nos dois sentidos).
 
+## Firebase (sem servidor próprio)
+O app usa o **Firebase Realtime Database** para o handshake, então funciona pela internet sem hospedar nada.
+1. Crie um projeto em https://console.firebase.google.com, ative **Authentication > Anônimo** e crie um **Realtime Database**.
+2. Publique as regras: `npm i -g firebase-tools && firebase login && firebase deploy --only database` (usa `firebase/database.rules.json`).
+3. Preencha `apiKey` e `databaseURL` em `app/src/firebase-config.js` e gere os instaladores.
+Sem essa configuração o app cai para o servidor WebSocket abaixo.
+
 ## Executar
 ```bash
 # 1) Servidor (em uma máquina acessível por todas)
@@ -18,6 +25,7 @@ cd app && npm install && npm start
 Por padrão o app usa `ws://localhost:8080`. Dê **duplo clique** no texto de status para informar o endereço do seu servidor (use `wss://` na internet).
 
 ## Instaladores
+Baixe em **Releases** (`.exe`, `.dmg`, `.AppImage`/`.deb`). Para gerar:
 `cd app && npm run dist` (gera para o SO atual), ou rode o workflow **Build** no GitHub Actions para os três sistemas.
 
 ## Permissões

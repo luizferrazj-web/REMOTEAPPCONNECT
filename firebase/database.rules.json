@@ -1,0 +1,22 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$id": {
+        ".read": "auth != null",
+        ".write": "auth != null && $id.matches(/^[0-9]{9}$/) && (!data.exists() || data.child('uid').val() === auth.uid)",
+        ".validate": "newData.child('uid').val() === auth.uid"
+      }
+    },
+    "signals": {
+      "$id": {
+        ".read": "auth != null && root.child('users').child($id).child('uid').val() === auth.uid",
+        "$msg": {
+          ".write": "auth != null && (!data.exists() || root.child('users').child($id).child('uid').val() === auth.uid)",
+          ".validate": "!newData.exists() || (newData.hasChildren(['from', 'data', 'ts']) && newData.child('from').isString())"
+        }
+      }
+    }
+  }
+}

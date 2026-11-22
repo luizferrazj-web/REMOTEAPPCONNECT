@@ -1,5 +1,4 @@
 const $ = (id) => document.getElementById(id);
-const SERVER = localStorage.getItem('server') || 'ws://localhost:8080';
 let ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const CHUNK = 16 * 1024;
 
@@ -14,31 +13,26 @@ $('saveFixed').onclick = () => {
 };
 const validPassword = (p) => p === password || (!!localStorage.getItem('fixedPass') && p === localStorage.getItem('fixedPass'));
 $('status').addEventListener('dblclick', () => {
-  const s = prompt('Endereço do servidor de sinalização', SERVER);
+  if ((window.IDEIA_CONFIG.firebase || {}).apiKey) return;
+  const s = prompt('Endereço do servidor de sinalização', localStorage.getItem('server') || 'ws://localhost:8080');
   if (s) { localStorage.setItem('server', s); location.reload(); }
 });
 
-let ws, myId, pc, ctrl, fileCh, isHost = false, peerId = null, hostDisplays = null;
+let myId, pc, ctrl, fileCh, isHost = false, peerId = null, hostDisplays = null, offerTimer;
 
-function connectSignaling() {
-  ws = new WebSocket(SERVER);
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'register', id: localStorage.getItem('id') }));
-  ws.onclose = () => { $('status').textContent = 'Servidor offline — tentando de novo…'; setTimeout(connectSignaling, 3000); };
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.type === 'registered') {
-      myId = m.id;
-      if (m.iceServers && m.iceServers.length) ICE = { iceServers: m.iceServers };
-      localStorage.setItem('id', myId);
-      $('myId').textContent = myId.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
-      $('status').textContent = 'Pronto (duplo clique para trocar o servidor)';
-    } else if (m.type === 'error') {
-      alert('ID não encontrado ou offline.');
-      endSession();
-    } else if (m.type === 'signal') onSignal(m.from, m.data);
-  };
-}
-const send = (to, data) => ws.send(JSON.stringify({ type: 'signal', to, data }));
+const transport = window.createTransport({
+  onStatus: (t) => { $('status').textContent = t; },
+  onRegistered: (id, iceServers) => {
+    myId = id;
+    if (iceServers && iceServers.length) ICE = { iceServers };
+    localStorage.setItem('id', id);
+    $('myId').textContent = id.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
+    $('status').textContent = 'Pronto';
+  },
+  onError: () => { alert('ID não encontrado ou offline.'); endSession(); },
+  onSignal: (from, data) => onSignal(from, data),
+});
+const send = (to, data) => transport.send(to, data);
 
 function newPC(remote) {
   pc = new RTCPeerConnection(ICE);
@@ -67,10 +61,12 @@ async function onSignal(from, d) {
     showSession(`Controlado por ${from}`);
     window.native.displays().then((list) => ctrl && ctrl.readyState === 'open' ? ctrl.send(JSON.stringify({ kind: 'displays', list })) : (hostDisplays = list));
   } else if (d.kind === 'answer' && pc) {
+    clearTimeout(offerTimer);
     await pc.setRemoteDescription({ type: 'answer', sdp: d.sdp });
   } else if (d.kind === 'ice' && pc) {
     pc.addIceCandidate(d.candidate).catch(() => {});
   } else if (d.kind === 'denied') {
+    clearTimeout(offerTimer);
     alert(d.reason);
     endSession();
   }
@@ -89,6 +85,7 @@ $('connect').onclick = async () => {
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   send(to, { kind: 'offer', sdp: offer.sdp, password: $('remotePass').value });
+  offerTimer = setTimeout(() => { alert('Sem resposta: a máquina está offline ou fechada.'); endSession(); }, 20000);
   showSession(`Conectado a ${to}`);
   bindInput();
 };
@@ -103,6 +100,7 @@ function showSession(text) {
 }
 
 function endSession() {
+  clearTimeout(offerTimer);
   if (pc) { pc.onconnectionstatechange = null; pc.close(); }
   pc = ctrl = fileCh = null;
   $('video').srcObject = null;
@@ -219,4 +217,4 @@ drop.ondragover = (e) => { e.preventDefault(); $('drop').classList.add('over'); 
 drop.ondragleave = () => $('drop').classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); $('drop').classList.remove('over'); [...e.dataTransfer.files].forEach(sendFile); };
 
-connectSignaling();
+transport.start();
