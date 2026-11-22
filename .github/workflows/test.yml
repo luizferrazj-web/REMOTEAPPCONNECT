@@ -15,7 +15,7 @@ jobs:
         shell: bash
         working-directory: app
     env:
-      XVFB: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }}
+      XVFB: ${{ matrix.os == 'ubuntu-latest' && 'xvfb-run -a -s "-screen 0 1280x800x24"' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
